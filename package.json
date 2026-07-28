@@ -1,0 +1,15 @@
+{
+  "name": "instagram-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for Instagram - post photo/reels/story/carousel via Instagram Graph API",
+  "type": "module",
+  "bin": { "instagram-mcp-server": "build/index.js" },
+  "files": ["build"],
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', 0o755)\"",
+    "prepare": "npm run build",
+    "start": "node build/index.js"
+  },
+  "dependencies": { "@modelcontextprotocol/sdk": "^1.0.0" },
+  "devDependencies": { "typescript": "^5.5.0", "@types/node": "^20.0.0" }
+}
