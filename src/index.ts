@@ -122,17 +122,23 @@ async function handle(name: string, a: any): Promise<any> {
   }
 }
 
-const server = new Server({ name: "instagram-mcp-server", version: "1.1.0" }, { capabilities: { tools: {} } });
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  try {
-    const { name, arguments: args } = req.params;
-    const result = await handle(name, args ?? {});
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-  } catch (e: any) {
-    return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
-  }
-});
+// Moi request HTTP phai co Server rieng. Mot instance dung chung se nem
+// "Already connected to a transport" cho moi request den trong luc request truoc
+// con mo, va cac tool cho Meta xu ly video giu response toi 60 giay.
+function buildServer(): Server {
+  const server = new Server({ name: "instagram-mcp-server", version: "1.1.0" }, { capabilities: { tools: {} } });
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    try {
+      const { name, arguments: args } = req.params;
+      const result = await handle(name, args ?? {});
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (e: any) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+  return server;
+}
 async function runHttp(): Promise<void> {
   const authToken = process.env.MCP_AUTH_TOKEN || "";
   if (!authToken) {
@@ -150,13 +156,18 @@ async function runHttp(): Promise<void> {
       res.status(401).json(jsonRpcError(-32001, "Unauthorized"));
       return;
     }
+    const server = buildServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    // Dang ky truoc khi connect: neu res dong som thi transport van duoc don,
+    // khong de lai transport treo.
+    res.on("close", () => { void transport.close(); void server.close(); });
     try {
-      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
-      res.on("close", () => transport.close());
     } catch (e: any) {
       console.error("Error handling MCP request:", e);
+      void transport.close();
+      void server.close();
       if (!res.headersSent) res.status(500).json(jsonRpcError(-32603, "Internal server error"));
     }
   });
@@ -171,6 +182,7 @@ async function main(): Promise<void> {
   if (transport === "http") {
     await runHttp();
   } else {
+    const server = buildServer();
     const t = new StdioServerTransport();
     await server.connect(t);
     console.error("Instagram MCP Server running on stdio");
