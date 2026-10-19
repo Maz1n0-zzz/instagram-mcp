@@ -1,6 +1,6 @@
 {
   "name": "instagram-mcp-server",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "MCP server for Instagram - post photo/reels/story/carousel via Instagram Graph API",
   "type": "module",
   "bin": { "instagram-mcp-server": "build/index.js" },

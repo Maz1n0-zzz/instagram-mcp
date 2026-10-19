@@ -33,12 +33,34 @@ import { CallToolRequestSchema, ListToolsRequestSchema, Tool } from "@modelconte
 const GRAPH = process.env.FB_GRAPH_VERSION || "v21.0";
 const BASE = `https://graph.facebook.com/${GRAPH}`;
 
+// ID cua Meta chi gom chu so, chu cai va dau gach duoi, vi du 123_456. Khong kiem
+// thi mot id nhu "me/accounts?fields=access_token&x=" doi han endpoint Graph API, va
+// "me/permissions" voi method DELETE thu hoi quyen cua token mac dinh tren server.
+const ID_RE = /^[0-9A-Za-z_]{1,64}$/;
+function safeId(v: any, label: string): string {
+  const raw = typeof v === "string" || typeof v === "number" ? String(v).trim() : "";
+  if (!ID_RE.test(raw)) throw new Error(`${label} khong hop le: chi nhan chu so, chu cai va dau gach duoi, toi da 64 ky tu.`);
+  return raw;
+}
+
 function cfg(a: any = {}) {
-  const IG_ID = a.ig_user_id || process.env.IG_USER_ID || "";
-  const TOKEN = a.access_token || process.env.IG_ACCESS_TOKEN || "";
+  const argId = typeof a.ig_user_id === "string" || typeof a.ig_user_id === "number" ? String(a.ig_user_id).trim() : "";
+  const argToken = typeof a.access_token === "string" ? a.access_token.trim() : "";
   const missing: string[] = [];
+  // Truyen mot nua thi phai truyen du ca cap, KHONG roi ve credential mac dinh cua
+  // server. Mot o access_token de trong tung lam bai cua tai khoan nay dang len tai
+  // khoan khac ma van bao thanh cong.
+  if (argId || argToken) {
+    if (!argId) missing.push("ig_user_id (da truyen access_token nen phai truyen du ca cap)");
+    if (!argToken) missing.push("access_token (da truyen ig_user_id nen phai truyen du ca cap)");
+    if (argId) safeId(argId, "ig_user_id");
+    return { IG_ID: argId, TOKEN: argToken, missing };
+  }
+  const IG_ID = process.env.IG_USER_ID || "";
+  const TOKEN = process.env.IG_ACCESS_TOKEN || "";
   if (!IG_ID) missing.push("ig_user_id (hoac bien moi truong IG_USER_ID)");
   if (!TOKEN) missing.push("access_token (hoac bien moi truong IG_ACCESS_TOKEN)");
+  if (IG_ID) safeId(IG_ID, "IG_USER_ID");
   return { IG_ID, TOKEN, missing };
 }
 
@@ -115,9 +137,9 @@ async function handle(name: string, a: any): Promise<any> {
       return publishContainer(c, { media_type: "CAROUSEL", caption: a.caption, children: childIds.join(",") }, true, a);
     }
     case "list_media": return api(`/${c.IG_ID}/media`, "GET", { limit: a.limit ?? 10, fields: "id,caption,media_type,media_url,permalink,timestamp" }, a);
-    case "get_media": return api(`/${a.media_id}`, "GET", { fields: "id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count" }, a);
-    case "get_comments": return api(`/${a.media_id}/comments`, "GET", { limit: a.limit ?? 25, fields: "id,text,username,timestamp" }, a);
-    case "reply_comment": return api(`/${a.comment_id}/replies`, "POST", { message: a.message }, a);
+    case "get_media": return api(`/${safeId(a.media_id, "media_id")}`, "GET", { fields: "id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count" }, a);
+    case "get_comments": return api(`/${safeId(a.media_id, "media_id")}/comments`, "GET", { limit: a.limit ?? 25, fields: "id,text,username,timestamp" }, a);
+    case "reply_comment": return api(`/${safeId(a.comment_id, "comment_id")}/replies`, "POST", { message: a.message }, a);
     default: throw new Error(`Unknown tool: ${name}`);
   }
 }
@@ -126,7 +148,7 @@ async function handle(name: string, a: any): Promise<any> {
 // "Already connected to a transport" cho moi request den trong luc request truoc
 // con mo, va cac tool cho Meta xu ly video giu response toi 60 giay.
 function buildServer(): Server {
-  const server = new Server({ name: "instagram-mcp-server", version: "1.1.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "instagram-mcp-server", version: "1.2.0" }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
