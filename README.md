@@ -8,6 +8,10 @@ MCP đăng & quản lý nội dung Instagram (tài khoản Business/Creator) qua
 
 Mọi tool nhận thêm hai tham số tuỳ chọn `ig_user_id` và `access_token`, nên một bản chạy phục vụ được nhiều tài khoản. Không truyền thì server dùng biến môi trường làm giá trị mặc định.
 
+Truyền `ig_user_id` thì phải truyền cả `access_token`, và ngược lại. Truyền nửa cặp thì server báo thiếu cấu hình chứ **không** lặng lẽ dùng credential mặc định. Một ô để trống từng làm bài của tài khoản này đăng lên tài khoản khác mà vẫn báo thành công.
+
+Mọi tham số id chỉ nhận chữ số, chữ cái và dấu gạch dưới, tối đa 64 ký tự. Id chứa `/`, `?` hay `&` bị từ chối, vì nó đổi được endpoint Graph API.
+
 ## Biến môi trường
 | Biến | Bắt buộc | Mô tả |
 |------|:--:|------|
