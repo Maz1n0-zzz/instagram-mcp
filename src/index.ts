@@ -14,11 +14,20 @@
  *   IG_ACCESS_TOKEN       - Access Token (long-lived, quyen instagram_content_publish)
  * ENV tuỳ chọn:
  *   FB_GRAPH_VERSION      - mặc định v21.0
+ *   MCP_TRANSPORT         - "stdio" (mặc định, dùng cho npx) hoặc "http" (remote, dùng cho Evose)
+ * ENV bắt buộc khi MCP_TRANSPORT=http:
+ *   MCP_AUTH_TOKEN        - secret dùng để xác thực header Authorization: Bearer <token>
+ * ENV tuỳ chọn khi MCP_TRANSPORT=http:
+ *   HOST                  - địa chỉ bind, mặc định 127.0.0.1 (đứng sau reverse proxy)
+ *   PORT                  - cổng lắng nghe, mặc định 8789
+ *   MCP_PUBLIC_HOST       - hostname công khai (qua Caddy/Nginx) để chặn DNS rebinding
  *
  * LƯU Ý: server KHÔNG thoát khi thiếu env.
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, Tool } from "@modelcontextprotocol/sdk/types.js";
 
 const GRAPH = process.env.FB_GRAPH_VERSION || "v21.0";
@@ -113,7 +122,7 @@ async function handle(name: string, a: any): Promise<any> {
   }
 }
 
-const server = new Server({ name: "instagram-mcp-server", version: "1.0.0" }, { capabilities: { tools: {} } });
+const server = new Server({ name: "instagram-mcp-server", version: "1.1.0" }, { capabilities: { tools: {} } });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   try {
@@ -124,5 +133,47 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
   }
 });
-async function main() { const t = new StdioServerTransport(); await server.connect(t); console.error("Instagram MCP Server running on stdio"); }
+async function runHttp(): Promise<void> {
+  const authToken = process.env.MCP_AUTH_TOKEN || "";
+  if (!authToken) {
+    console.error("Fatal: thieu MCP_AUTH_TOKEN (bat buoc khi MCP_TRANSPORT=http).");
+    process.exit(1);
+  }
+  const host = process.env.HOST || "127.0.0.1";
+  const port = Number(process.env.PORT) || 8789;
+  const publicHost = process.env.MCP_PUBLIC_HOST;
+  const app = createMcpExpressApp(publicHost ? { host, allowedHosts: [publicHost] } : { host });
+  const jsonRpcError = (code: number, message: string) => ({ jsonrpc: "2.0", error: { code, message }, id: null });
+
+  app.post("/mcp", async (req, res) => {
+    if (req.header("authorization") !== `Bearer ${authToken}`) {
+      res.status(401).json(jsonRpcError(-32001, "Unauthorized"));
+      return;
+    }
+    try {
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+      res.on("close", () => transport.close());
+    } catch (e: any) {
+      console.error("Error handling MCP request:", e);
+      if (!res.headersSent) res.status(500).json(jsonRpcError(-32603, "Internal server error"));
+    }
+  });
+  app.get("/mcp", (_req, res) => res.status(405).json(jsonRpcError(-32000, "Method not allowed.")));
+  app.delete("/mcp", (_req, res) => res.status(405).json(jsonRpcError(-32000, "Method not allowed.")));
+
+  app.listen(port, host, () => console.error(`Instagram MCP Server (HTTP) dang chay tren http://${host}:${port}/mcp`));
+}
+
+async function main(): Promise<void> {
+  const transport = (process.env.MCP_TRANSPORT || "stdio").toLowerCase();
+  if (transport === "http") {
+    await runHttp();
+  } else {
+    const t = new StdioServerTransport();
+    await server.connect(t);
+    console.error("Instagram MCP Server running on stdio");
+  }
+}
 main().catch((e) => { console.error("Fatal:", e); process.exit(1); });
